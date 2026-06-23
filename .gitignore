@@ -1,0 +1,57 @@
+# ============================================================
+# MervyPlayer — Fichiers à ne pas publier sur GitHub
+# ============================================================
+
+# --- Secrets & certificats HTTPS (générés localement par server.js) ---
+# Ne JAMAIS partager la clé privée — elle permet d'usurper votre serveur.
+cert.pem
+key.pem
+*.pem
+
+# --- Binaire yt-dlp (téléchargé automatiquement au 1er lancement) ---
+# ~18 Mo — inutile sur GitHub, server.js le retélécharge si absent.
+bin/yt-dlp.exe
+bin/*.exe
+
+# --- Fichiers audio temporaires (téléchargements en cours sur le PC) ---
+temp/
+temp/*
+
+# --- Variables d'environnement & secrets ---
+.env
+.env.*
+.env.local
+
+# --- Dépendances Node (si npm install un jour) ---
+node_modules/
+
+# --- Journaux & fichiers de debug ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Système d'exploitation ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Artefacts Windows (erreur de redirection shell) ---
+nul
+
+# --- Éditeurs / IDE (préférences personnelles) ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Fichiers de build / cache optionnels ---
+dist/
+build/
+.cache/
+*.tmp
+*.temp

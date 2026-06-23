@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>MervyPlayer - Musique Offline</title>
+
+    <!-- SEO Meta Tags -->
+    <meta name="description"
+        content="Lecteur de musique offline premium connecté à YouTube pour Mervy. Importez vos musiques et écoutez sans limite de connexion.">
+    <meta name="theme-color" content="#0a0512">
+
+    <!-- iOS / PWA specific tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MervyPlayer">
+    <!-- Icônes écran d'accueil iOS (PNG obligatoire — pas de lettre générée par Safari) -->
+    <link rel="apple-touch-icon" href="icon-192.png?v=1.1">
+    <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png?v=1.1">
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png?v=1.1">
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png?v=1.1">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png?v=1.1">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=1.1">
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- Main Style Sheet -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <!-- Splash Screen Animation -->
+    <div id="splash-screen" aria-hidden="true">
+        <div class="splash-bg-glow"></div>
+        <div class="splash-bg-glow splash-bg-glow-2"></div>
+        <div class="splash-particles">
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="splash-content">
+            <div class="splash-logo-wrap">
+                <div class="splash-ring splash-ring-1"></div>
+                <div class="splash-ring splash-ring-2"></div>
+                <img src="/icon-192.png" alt="" class="splash-logo">
+            </div>
+            <h1 class="splash-title">
+                <span class="splash-title-mervy">Mervy</span><span class="splash-title-player">Player</span>
+            </h1>
+            <p class="splash-tagline">Ta musique, partout</p>
+            <div class="splash-progress-track">
+                <div class="splash-progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application Container -->
+    <div id="app-container">
+
+        <!-- Header Bar -->
+        <header id="main-header">
+            <div class="header-brand">
+                <img src="/icon-192.png" alt="" class="header-logo">
+                <h1 id="app-title">MervyPlayer</h1>
+            </div>
+            <button id="force-update-btn" class="header-action-btn" title="Actualiser et mettre à jour">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                </svg>
+            </button>
+        </header>
+
+        <!-- Dynamic Content View Area -->
+        <main id="content-area">
+
+            <!-- SEARCH TAB CONTENT -->
+            <section id="tab-search" class="tab-content active">
+                <div class="search-bar-container">
+                    <div class="search-input-wrapper search-input-full">
+                        <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20">
+                            <path fill="currentColor"
+                                d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                        </svg>
+                        <input type="search" id="youtube-search-input" placeholder="Tapez pour rechercher sur YouTube..."
+                            autocomplete="off" enterkeyhint="search">
+                        <button type="button" id="search-clear-btn" class="input-clear-btn hidden" aria-label="Effacer la recherche">
+                            <svg viewBox="0 0 24 24" width="18" height="18">
+                                <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="search-body">
+                    <div id="search-results-placeholder" class="empty-state">
+                        <svg viewBox="0 0 24 24" width="64" height="64" class="empty-icon">
+                            <path fill="currentColor"
+                                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z" />
+                        </svg>
+                        <p>Recherchez des morceaux sur YouTube pour les écouter en aperçu ou les télécharger hors-ligne.</p>
+                    </div>
+
+                    <div id="search-results-panel" class="search-results-panel hidden">
+                        <div id="search-results-header" class="search-results-header">
+                            <span id="search-results-count" class="search-results-count">0 résultat</span>
+                            <span class="search-results-hint">Appuyez sur Écouter pour l'aperçu</span>
+                        </div>
+                        <div id="search-results-list" class="search-results-list scrollable"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- LIBRARY TAB CONTENT -->
+            <section id="tab-library" class="tab-content">
+                <div class="section-header">
+                    <h2>Ma Bibliothèque</h2>
+                    <div class="section-header-actions">
+                        <!-- Hidden file input for importing local files -->
+                        <input type="file" id="import-file-input" accept="*/*" style="display: none;" multiple>
+                        <button id="import-btn" class="outline-btn small-btn" title="Importer depuis l'iPhone">
+                            <svg viewBox="0 0 24 24" width="14" height="14" class="icon-inline">
+                                <path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
+                            </svg>
+                            Importer
+                        </button>
+                        <button id="export-all-btn" class="outline-btn small-btn" title="Exporter vers Fichiers iPhone">
+                            <svg viewBox="0 0 24 24" width="14" height="14" class="icon-inline">
+                                <path fill="currentColor" d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/>
+                            </svg>
+                            Exporter
+                        </button>
+                        <span id="library-count" class="badge">0 titre</span>
+                    </div>
+                </div>
+
+                <div class="library-filter-row">
+                    <div class="local-search-container search-input-wrapper">
+                        <input type="text" id="library-search-input" placeholder="Filtrer mes musiques...">
+                        <button type="button" id="library-clear-btn" class="input-clear-btn hidden" aria-label="Effacer le filtre">
+                            <svg viewBox="0 0 24 24" width="18" height="18">
+                                <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="sort-selector-container">
+                        <select id="library-sort-select" class="sort-select">
+                            <option value="recent">Récents</option>
+                            <option value="title">Titres (A-Z)</option>
+                            <option value="artist">Artistes (A-Z)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="library-empty" class="empty-state">
+                    <svg viewBox="0 0 24 24" width="64" height="64" class="empty-icon">
+                        <path fill="currentColor"
+                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+                    </svg>
+                    <p>Aucune musique stockée. Allez sur l'onglet Recherche pour ajouter des musiques !</p>
+                </div>
+
+                <div id="library-panel" class="tracks-panel">
+                    <div id="library-list-header" class="tracks-panel-header hidden">
+                        <span id="library-filter-count" class="tracks-panel-count">0 titre</span>
+                        <span class="tracks-panel-hint">Appuyez sur une ligne pour lire · ⋮ pour les options</span>
+                    </div>
+                    <div id="library-list" class="tracks-list scrollable"></div>
+                </div>
+            </section>
+
+            <!-- PLAYLISTS TAB CONTENT -->
+            <section id="tab-playlists" class="tab-content">
+                <div class="section-header">
+                    <h2>Mes Playlists</h2>
+                    <button id="create-playlist-btn" class="glow-btn small-btn">Nouvelle Playlist</button>
+                </div>
+
+                <div id="playlists-empty" class="empty-state">
+                    <svg viewBox="0 0 24 24" width="64" height="64" class="empty-icon">
+                        <path fill="currentColor"
+                            d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 9h-3v3c0 .55-.45 1-1 1s-1-.45-1-1v-4c0-.55.45-1 1-1h4c.55 0 1 .45 1 1s-.45 1-1 1z" />
+                    </svg>
+                    <p>Vous n'avez pas encore de playlist. Appuyez sur "Nouvelle Playlist" pour commencer.</p>
+                </div>
+
+                <div id="playlists-grid" class="playlists-grid scrollable"></div>
+
+                <!-- Expanded Playlist View -->
+                <div id="playlist-detail-view" class="playlist-detail-view hidden">
+                    <button id="playlist-back-btn" class="back-btn">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                            <path fill="currentColor"
+                                d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+                        </svg>
+                        Retour
+                    </button>
+                    <div class="playlist-detail-header">
+                        <div class="playlist-large-art">🎶</div>
+                        <div class="playlist-header-info">
+                            <h3 id="playlist-detail-title">Nom de la Playlist</h3>
+                            <p id="playlist-detail-count">0 morceau</p>
+                            <div class="playlist-action-row">
+                                <button id="playlist-play-all" class="play-all-btn">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" class="icon-inline">
+                                        <path fill="currentColor" d="M8 5v14l11-7z" />
+                                    </svg> Tout lire
+                                </button>
+                                <button id="playlist-delete" class="delete-playlist-btn">Supprimer</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="playlist-detail-list" class="tracks-list scrollable"></div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Floating Player Bar (Bottom) -->
+        <div id="floating-player" class="hidden">
+            <div class="player-progress-bar-tiny">
+                <div id="player-progress-fill-tiny"></div>
+            </div>
+            <div class="floating-player-content">
+                <div class="floating-player-info" id="floating-player-trigger">
+                    <img id="floating-thumbnail"
+                        src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><rect width='40' height='40' fill='%23221a36'/></svg>"
+                        alt="Cover">
+                    <div class="floating-track-text">
+                        <div id="floating-title" class="marquee-wrapper"><span class="marquee">Aucun morceau</span>
+                        </div>
+                        <div id="floating-artist">Artiste</div>
+                    </div>
+                </div>
+                <div class="floating-player-controls">
+                    <button id="floating-play-btn" class="circle-btn">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                            <path id="floating-play-icon-path" fill="currentColor" d="M8 5v14l11-7z" />
+                        </svg>
+                    </button>
+                    <button id="floating-next-btn" class="icon-btn">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                            <path fill="currentColor" d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fullscreen Player Drawer (Slides up from bottom) -->
+        <aside id="fullscreen-player" class="collapsed">
+            <!-- Notch/Pull Handle -->
+            <div id="player-pull-handle">
+                <span class="handle-bar"></span>
+            </div>
+
+            <header class="player-header">
+                <button id="player-close-btn" class="close-btn">
+                    <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
+                    </svg>
+                </button>
+                <span class="player-header-title">En Lecture</span>
+                <div style="width: 24px;"></div> <!-- Spacer for alignment -->
+            </header>
+
+            <div class="player-body">
+                <!-- Glowing/Rotating Cover Art -->
+                <div class="cover-art-container">
+                    <img id="player-cover-art"
+                        src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'><rect width='300' height='300' fill='%23221a36'/></svg>"
+                        alt="Pochette">
+                </div>
+
+                <!-- Song Info -->
+                <div class="player-track-info">
+                    <div class="title-action-wrapper">
+                        <h2 id="player-track-title">Aucune musique</h2>
+                        <button id="favorite-btn" class="heart-btn">
+                            <svg viewBox="0 0 24 24" width="24" height="24">
+                                <path id="heart-icon-path" fill="currentColor"
+                                    d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <p id="player-track-artist">Artiste</p>
+                </div>
+
+                <!-- Scrubber Progress Bar -->
+                <div class="player-scrubber">
+                    <div class="scrubber-track-wrap">
+                        <div class="scrubber-rail">
+                            <div class="scrubber-fill" id="player-progress-fill"></div>
+                        </div>
+                        <input type="range" id="player-progress-slider" min="0" max="100" value="0" step="0.25" aria-label="Position dans le morceau">
+                    </div>
+                    <div class="scrubber-times">
+                        <span id="player-time-current" class="time-label">0:00</span>
+                        <span id="player-time-duration" class="time-label">0:00</span>
+                    </div>
+                </div>
+
+                <!-- Main Player Controls -->
+                <div class="player-main-controls">
+                    <button id="shuffle-btn" class="control-toggle">
+                        <svg viewBox="0 0 24 24" width="22" height="22">
+                            <path fill="currentColor"
+                                d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.44 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" />
+                        </svg>
+                    </button>
+
+                    <button id="prev-btn" class="circle-nav-btn">
+                        <svg viewBox="0 0 24 24" width="28" height="28">
+                            <path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                        </svg>
+                    </button>
+
+                    <button id="play-pause-btn" class="circle-play-btn">
+                        <svg viewBox="0 0 24 24" width="40" height="40">
+                            <path id="play-icon-path" fill="currentColor" d="M8 5v14l11-7z" />
+                        </svg>
+                    </button>
+
+                    <button id="next-btn" class="circle-nav-btn">
+                        <svg viewBox="0 0 24 24" width="28" height="28">
+                            <path fill="currentColor" d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                        </svg>
+                    </button>
+
+                    <button id="repeat-btn" class="control-toggle" aria-label="Mode répétition">
+                        <svg viewBox="0 0 24 24" width="22" height="22">
+                            <path id="repeat-icon-path" fill="currentColor"
+                                d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
+                        </svg>
+                        <span id="repeat-badge" class="repeat-badge hidden">1</span>
+                    </button>
+                </div>
+
+                <!-- Utilities (Add to Playlist) -->
+                <div class="player-utilities">
+                    <button id="add-to-playlist-btn" class="utility-btn glow-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18" class="icon-inline">
+                            <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+                        </svg>
+                        Ajouter à une playlist
+                    </button>
+                </div>
+
+                <!-- Small Neon Visualizer Animation -->
+                <div class="visualizer-bars">
+                    <span class="bar bar-1"></span>
+                    <span class="bar bar-2"></span>
+                    <span class="bar bar-3"></span>
+                    <span class="bar bar-4"></span>
+                    <span class="bar bar-5"></span>
+                    <span class="bar bar-6"></span>
+                    <span class="bar bar-7"></span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Bottom Navigation Bar (Tabs) -->
+        <nav id="bottom-tabs" role="navigation" aria-label="Navigation principale">
+            <button class="tab-btn active" data-tab="search" aria-label="Recherche">
+                <span class="tab-btn-inner">
+                    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                        <path fill="currentColor"
+                            d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                    </svg>
+                    <span class="tab-label">Recherche</span>
+                </span>
+            </button>
+            <button class="tab-btn" data-tab="library" aria-label="Ma Bibliothèque">
+                <span class="tab-btn-inner">
+                    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                        <path fill="currentColor"
+                            d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                    </svg>
+                    <span class="tab-label">Bibliothèque</span>
+                </span>
+            </button>
+            <button class="tab-btn" data-tab="playlists" aria-label="Playlists">
+                <span class="tab-btn-inner">
+                    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                        <path fill="currentColor"
+                            d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 9h-8V9h8v2zm0-4h-8V5h8v2zm-3 8h-5v-2h5v2z" />
+                    </svg>
+                    <span class="tab-label">Playlists</span>
+                </span>
+            </button>
+        </nav>
+
+        <!-- Popup Modal for Creating Playlist -->
+        <div id="playlist-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h3>Nouvelle Playlist</h3>
+                <input type="text" id="playlist-name-input" placeholder="Nom de la playlist..." maxlength="30">
+                <div class="modal-actions">
+                    <button id="modal-cancel-btn" class="text-btn">Annuler</button>
+                    <button id="modal-create-btn" class="glow-btn">Créer</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Popup Modal for Adding Song to Playlist -->
+        <div id="add-to-playlist-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h3>Ajouter à une playlist</h3>
+                <div id="playlist-selector-list" class="modal-list scrollable"></div>
+                <div class="modal-actions">
+                    <button id="add-to-playlist-cancel-btn" class="text-btn">Fermer</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" aria-live="polite"></div>
+
+    <!-- Hidden Native Audio Node -->
+    <audio id="native-audio-element" style="display:none;"></audio>
+
+    <!-- App JavaScript -->
+    <script src="jszip.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
