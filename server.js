@@ -167,29 +167,79 @@ const MIME_TYPES = {
 function generateCertificates() {
     const keyPath = path.join(__dirname, 'key.pem');
     const certPath = path.join(__dirname, 'cert.pem');
+    const cnfPath = path.join(__dirname, 'openssl.cnf');
     
     if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
         return true;
     }
     
-    console.log('Generating self-signed SSL certificates...');
+    console.log('Generating self-signed SSL certificates with Subject Alternative Names (SAN) for iOS compatibility...');
+    
+    // Récupérer le nom de la machine et les adresses IP locales
+    const hostname = os.hostname();
+    const ips = getLocalIPs();
+    
+    // Construire le fichier de configuration OpenSSL
+    let altNames = [
+        `DNS.1 = localhost`,
+        `DNS.2 = ${hostname}.local`,
+        `DNS.3 = ${hostname.toLowerCase()}.local`,
+        `IP.1 = 127.0.0.1`
+    ];
+    
+    ips.forEach((ip, idx) => {
+        altNames.push(`IP.${idx + 2} = ${ip}`);
+    });
+    
+    const configContent = `[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = ${hostname}.local
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+${altNames.join('\n')}
+`;
+
+    try {
+        fs.writeFileSync(cnfPath, configContent);
+    } catch (e) {
+        console.error('Failed to write openssl.cnf config:', e.message);
+        return false;
+    }
+    
     const opensslPaths = [
         'openssl',
         '"C:\\Program Files\\Git\\usr\\bin\\openssl.exe"',
         '"C:\\Program Files\\Git\\bin\\openssl.exe"'
     ];
     
+    let success = false;
     for (const openssl of opensslPaths) {
         try {
-            const cmd = `${openssl} req -x509 -newkey rsa:2048 -nodes -keyout "${keyPath}" -out "${certPath}" -days 365 -subj "/CN=MervyPlayer"`;
+            const cmd = `${openssl} req -x509 -newkey rsa:2048 -nodes -keyout "${keyPath}" -out "${certPath}" -days 365 -config "${cnfPath}" -sha256`;
             execSync(cmd, { stdio: 'ignore' });
-            console.log('SSL certificates generated successfully using:', openssl);
-            return true;
+            console.log('SSL certificates generated successfully with SAN (SHA-256) using:', openssl);
+            success = true;
+            break;
         } catch (e) {
             // try next path
         }
     }
-    return false;
+    
+    // Supprimer le fichier de configuration temporaire
+    try {
+        if (fs.existsSync(cnfPath)) fs.unlinkSync(cnfPath);
+    } catch (e) {}
+    
+    return success;
 }
 
 const { execSync } = require('child_process');
