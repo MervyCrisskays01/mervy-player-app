@@ -193,14 +193,17 @@ function generateCertificates() {
     
     const configContent = `[req]
 distinguished_name = req_distinguished_name
-x509_extensions = v3_req
+x509_extensions = v3_ca
 prompt = no
 
 [req_distinguished_name]
 CN = ${hostname}.local
 
-[v3_req]
-keyUsage = keyEncipherment, dataEncipherment
+[v3_ca]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
@@ -224,9 +227,10 @@ ${altNames.join('\n')}
     let success = false;
     for (const openssl of opensslPaths) {
         try {
-            const cmd = `${openssl} req -x509 -newkey rsa:2048 -nodes -keyout "${keyPath}" -out "${certPath}" -days 365 -config "${cnfPath}" -sha256`;
+            // Utiliser explicitement -extensions v3_ca pour forcer les attributs CA exigés par iOS
+            const cmd = `${openssl} req -x509 -newkey rsa:2048 -nodes -keyout "${keyPath}" -out "${certPath}" -days 365 -config "${cnfPath}" -sha256 -extensions v3_ca`;
             execSync(cmd, { stdio: 'ignore' });
-            console.log('SSL certificates generated successfully with SAN (SHA-256) using:', openssl);
+            console.log('SSL certificates generated successfully with SAN (SHA-256 + CA) using:', openssl);
             success = true;
             break;
         } catch (e) {
