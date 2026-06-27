@@ -616,7 +616,7 @@ async function pollDownloadProgress(videoId, progressFill, progressText, onProgr
     while (attempts < maxAttempts) {
         if (signal && signal.aborted) return;
         try {
-            const res = await fetch(`/api/download-status?id=${videoId}`, { signal });
+            const res = await fetch(serverConfig.apiUrl(`/api/download-status?id=${videoId}`), { signal });
             if (res.ok) {
                 const data = await res.json();
                 const serverPercent = Math.min(35, Math.max(5, Math.round(data.percent * 0.35)));
