@@ -165,9 +165,9 @@ const MIME_TYPES = {
  * cert.pem = certificat public présenté au navigateur
  */
 function generateCertificates() {
-    const keyPath = path.join(__dirname, 'key.pem');
-    const certPath = path.join(__dirname, 'cert.pem');
-    const cnfPath = path.join(__dirname, 'openssl.cnf');
+    const keyPath = path.join(__dirname, 'key.pem').replace(/\\/g, '/');
+    const certPath = path.join(__dirname, 'cert.pem').replace(/\\/g, '/');
+    const cnfPath = path.join(__dirname, 'openssl.cnf').replace(/\\/g, '/');
     
     if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
         return true;
