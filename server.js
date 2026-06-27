@@ -263,6 +263,13 @@ checkYtdlp().then(() => {
         
         // ---------------- API ENDPOINTS ----------------
         
+        // 0. Ping API: /api/ping (test de connectivité rapide)
+        if (pathname === '/api/ping' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ ok: true, time: Date.now() }));
+            return;
+        }
+
         // 1. YouTube Search API: /api/search?q=query
         if (pathname === '/api/search' && req.method === 'GET') {
             const query = parsedUrl.searchParams.get('q');

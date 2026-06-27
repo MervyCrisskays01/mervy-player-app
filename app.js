@@ -127,85 +127,185 @@ const ICONS = {
 };
 
 // ----------------------------------------------------
-// 1. INDEXEDDB — Base de données locale du navigateur
-// Stocke les musiques téléchargées et les playlists sur l'iPhone
+// 1. CONFIGURATION SERVEUR DYNAMIQUE
+// Sauvegarde l'URL du serveur PC dans localStorage pour ne pas
+// dépendre de l'IP (qui change). L'URL est utilisée pour les
+// appels API (recherche, téléchargement) mais PAS pour le stockage.
 // ----------------------------------------------------
-const db = {
-    instance: null,
-    dbName: 'MervyPlayerDB',
-    version: 1,
+const serverConfig = {
+    baseUrl: '',
 
     init() {
-        return new Promise((resolve, reject) => {
-            // iOS Workaround: Touch window.indexedDB early to trigger internal initialization
+        const saved = localStorage.getItem('mp_server_url');
+        if (saved) {
+            this.baseUrl = saved;
+        } else {
+            // Première fois : utiliser l'origine actuelle (pour le premier chargement depuis le PC)
+            this.baseUrl = window.location.origin;
+            localStorage.setItem('mp_server_url', this.baseUrl);
+        }
+        console.log('[ServerConfig] URL serveur :', this.baseUrl);
+    },
+
+    save(url) {
+        const clean = url.replace(/\/$/, '');
+        this.baseUrl = clean;
+        localStorage.setItem('mp_server_url', clean);
+        console.log('[ServerConfig] URL serveur sauvegardée :', clean);
+    },
+
+    async ping() {
+        try {
+            const r = await fetch(this.baseUrl + '/api/ping', {
+                signal: AbortSignal.timeout(4000)
+            });
+            return r.ok;
+        } catch {
+            return false;
+        }
+    },
+
+    apiUrl(path) {
+        return this.baseUrl + path;
+    }
+};
+
+// ----------------------------------------------------
+// 2. STOCKAGE HYBRIDE — OPFS (primaire) + IndexedDB (fallback)
+//
+// OPFS (Origin Private File System) stocke les fichiers audio
+// dans un vrai système de fichiers privé lié à l'ORIGINE du site
+// (ex: mervycrisskays01.github.io), PAS à l'IP du serveur.
+// C'est beaucoup plus stable que IndexedDB sur iOS Safari PWA.
+// ----------------------------------------------------
+const storage = {
+    idbInstance: null,
+    opfsSupported: false,
+    idbAvailable: false,
+    dbName: 'MervyPlayerDB',
+
+    // ---- OPFS : stockage des fichiers audio ----
+    async opfsInit() {
+        try {
+            if ('storage' in navigator && 'getDirectory' in navigator.storage) {
+                // Test OPFS write access
+                const root = await navigator.storage.getDirectory();
+                await root.getDirectoryHandle('audio', { create: true });
+                this.opfsSupported = true;
+                console.log('[Storage] OPFS disponible ✅');
+            } else {
+                console.log('[Storage] OPFS non disponible, fallback IndexedDB');
+            }
+        } catch (e) {
+            console.warn('[Storage] OPFS init failed:', e);
+            this.opfsSupported = false;
+        }
+    },
+
+    async opfsSaveAudio(id, arrayBuffer) {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle('audio', { create: true });
+        const fh = await dir.getFileHandle(`${id}.m4a`, { create: true });
+        const writable = await fh.createWritable();
+        await writable.write(arrayBuffer);
+        await writable.close();
+    },
+
+    async opfsGetAudio(id) {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle('audio');
+        const fh = await dir.getFileHandle(`${id}.m4a`);
+        const file = await fh.getFile();
+        return file.arrayBuffer();
+    },
+
+    async opfsDeleteAudio(id) {
+        try {
+            const root = await navigator.storage.getDirectory();
+            const dir = await root.getDirectoryHandle('audio');
+            await dir.removeEntry(`${id}.m4a`);
+        } catch (e) {
+            console.warn('[OPFS] Delete failed (file may not exist):', e);
+        }
+    },
+
+    async opfsListIds() {
+        try {
+            const root = await navigator.storage.getDirectory();
+            const dir = await root.getDirectoryHandle('audio');
+            const ids = [];
+            for await (const [name] of dir.entries()) {
+                if (name.endsWith('.m4a')) ids.push(name.replace('.m4a', ''));
+            }
+            return ids;
+        } catch {
+            return [];
+        }
+    },
+
+    // ---- IndexedDB : stockage des métadonnées + fallback audio ----
+    idbInit() {
+        return new Promise((resolve) => {
+            // iOS Workaround: Touch window.indexedDB early
             if (typeof window !== 'undefined' && window.indexedDB) {
                 try {
-                    const dummyReq = window.indexedDB.open("mervyplayer_dummy_init", 1);
-                    dummyReq.onsuccess = (e) => {
-                        const dummyDb = e.target.result;
-                        if (dummyDb) dummyDb.close();
-                    };
-                } catch (e) {
-                    console.warn("Dummy DB touch failed (expected):", e);
-                }
+                    const dummyReq = window.indexedDB.open('mervyplayer_dummy_init', 1);
+                    dummyReq.onsuccess = (e) => { if (e.target.result) e.target.result.close(); };
+                } catch (e) { /* expected */ }
             }
 
             let attempts = 0;
-            const maxAttempts = 5;
+            const maxAttempts = 10;
 
             const tryOpen = () => {
                 try {
-                    const request = indexedDB.open(this.dbName);
+                    const request = indexedDB.open(this.dbName, 2);
 
-                    request.onerror = (e) => {
+                    request.onerror = () => {
                         attempts++;
-                        const err = e.target.error || new Error('Erreur IndexedDB inconnue');
-                        console.warn(`IndexedDB open attempt ${attempts}/${maxAttempts} failed:`, err);
+                        console.warn(`[IDB] Open attempt ${attempts}/${maxAttempts} failed`);
                         if (attempts >= maxAttempts) {
-                            reject(err);
+                            console.error('[IDB] IndexedDB indisponible après plusieurs tentatives. Mode dégradé.');
+                            this.idbAvailable = false;
+                            resolve(); // Ne pas rejeter — on continue avec OPFS
                         } else {
-                            // Retry with linear/exponential backoff (250ms, 750ms...)
-                            setTimeout(tryOpen, attempts * 500 - 250);
+                            setTimeout(tryOpen, Math.min(attempts * 600, 3000));
                         }
                     };
 
-                    request.onblocked = (e) => {
-                        console.warn('IndexedDB blocked by another open connection:', e);
+                    request.onblocked = () => {
+                        console.warn('[IDB] Bloqué par une autre connexion ouverte');
                     };
 
                     request.onsuccess = (e) => {
-                        this.instance = e.target.result;
-                        
-                        // Connection loss listener to auto-recover when database closes unexpectedly
-                        this.instance.onclose = () => {
-                            console.warn('IndexedDB connection lost. Re-initializing...');
-                            this.instance = null;
-                            this.init().catch(err => console.error('Auto-reopen DB failed:', err));
+                        this.idbInstance = e.target.result;
+                        this.idbAvailable = true;
+                        this.idbInstance.onclose = () => {
+                            console.warn('[IDB] Connexion perdue, tentative de réouverture...');
+                            this.idbInstance = null;
+                            this.idbAvailable = false;
+                            this.idbInit().catch(() => {});
                         };
-                        
+                        console.log('[Storage] IndexedDB disponible ✅');
                         resolve();
                     };
 
                     request.onupgradeneeded = (e) => {
                         const database = e.target.result;
-                        
-                        // Create songs store
                         if (!database.objectStoreNames.contains('songs')) {
                             database.createObjectStore('songs', { keyPath: 'id' });
                         }
-                        
-                        // Create playlists store
                         if (!database.objectStoreNames.contains('playlists')) {
                             database.createObjectStore('playlists', { keyPath: 'id', autoIncrement: true });
                         }
                     };
                 } catch (err) {
                     attempts++;
-                    console.warn(`IndexedDB open tryOpen threw exception (attempt ${attempts}/${maxAttempts}):`, err);
                     if (attempts >= maxAttempts) {
-                        reject(err);
+                        this.idbAvailable = false;
+                        resolve();
                     } else {
-                        setTimeout(tryOpen, attempts * 500 - 250);
+                        setTimeout(tryOpen, Math.min(attempts * 600, 3000));
                     }
                 }
             };
@@ -214,35 +314,187 @@ const db = {
         });
     },
 
-    getAll(storeName) {
+    idbGetAll(storeName) {
+        if (!this.idbAvailable || !this.idbInstance) return Promise.resolve([]);
         return new Promise((resolve, reject) => {
-            const tx = this.instance.transaction(storeName, 'readonly');
-            const store = tx.objectStore(storeName);
-            const request = store.getAll();
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            try {
+                const tx = this.idbInstance.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            } catch (e) { reject(e); }
         });
     },
 
-    save(storeName, item) {
+    idbSave(storeName, item) {
+        if (!this.idbAvailable || !this.idbInstance) return Promise.resolve(null);
         return new Promise((resolve, reject) => {
-            const tx = this.instance.transaction(storeName, 'readwrite');
-            const store = tx.objectStore(storeName);
-            const request = store.put(item);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            try {
+                const tx = this.idbInstance.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.put(item);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            } catch (e) { reject(e); }
         });
     },
 
-    delete(storeName, key) {
+    idbDelete(storeName, key) {
+        if (!this.idbAvailable || !this.idbInstance) return Promise.resolve();
         return new Promise((resolve, reject) => {
-            const tx = this.instance.transaction(storeName, 'readwrite');
-            const store = tx.objectStore(storeName);
-            const request = store.delete(key);
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
+            try {
+                const tx = this.idbInstance.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.delete(key);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            } catch (e) { reject(e); }
         });
+    },
+
+    // ---- Interface unifiée ----
+    async init() {
+        await Promise.all([this.opfsInit(), this.idbInit()]);
+        // Demander la persistance du stockage à iOS (recommandé)
+        if (navigator.storage && navigator.storage.persist) {
+            const granted = await navigator.storage.persist();
+            console.log(`[Storage] Persistance accordée: ${granted ? '✅ oui' : '⚠️ non garanti'}`);
+        }
+    },
+
+    // Sauvegarde une chanson : audio → OPFS (ou IDB fallback), méta → IDB + localStorage
+    async saveSong(song) {
+        const { audioData, ...meta } = song;
+
+        if (this.opfsSupported && audioData) {
+            await this.opfsSaveAudio(song.id, audioData);
+            meta.storageType = 'opfs';
+        } else if (this.idbAvailable && audioData) {
+            // Fallback : stocker dans IDB avec l'audio
+            await this.idbSave('songs', { ...meta, audioData, storageType: 'idb' });
+            this._syncMetaToLocalStorage(meta);
+            return;
+        }
+
+        // Sauvegarder les métadonnées dans IDB (sans l'audio binaire)
+        await this.idbSave('songs', meta);
+        this._syncMetaToLocalStorage(meta);
+    },
+
+    // Charge l'audio d'une chanson (depuis OPFS ou IDB selon storageType)
+    async getAudio(song) {
+        if (song.storageType === 'opfs') {
+            return this.opfsGetAudio(song.id);
+        } else if (song.audioData) {
+            // Données déjà chargées (IDB legacy ou import local)
+            return song.audioData;
+        } else if (this.idbAvailable) {
+            // Tentative de lecture depuis IDB
+            const all = await this.idbGetAll('songs');
+            const found = all.find(s => s.id === song.id);
+            return found?.audioData || null;
+        }
+        return null;
+    },
+
+    // Récupère toutes les chansons (métadonnées, sans audioData)
+    async getAllSongs() {
+        if (this.idbAvailable) {
+            try {
+                const songs = await this.idbGetAll('songs');
+                // Pour les chansons IDB legacy (avec audioData), on les garde tel quel
+                return songs;
+            } catch (e) {
+                console.warn('[Storage] IDB getAll songs failed, fallback localStorage');
+            }
+        }
+        // Fallback : reconstruire depuis localStorage
+        return this._loadMetaFromLocalStorage();
+    },
+
+    // Playlists : toujours via IDB
+    getAllPlaylists() { return this.idbGetAll('playlists'); },
+    savePlaylist(pl) { return this.idbSave('playlists', pl); },
+    deletePlaylist(id) { return this.idbDelete('playlists', id); },
+
+    // Supprime une chanson de tous les storages
+    async deleteSong(id) {
+        await this.idbDelete('songs', id);
+        if (this.opfsSupported) await this.opfsDeleteAudio(id);
+        this._removeMetaFromLocalStorage(id);
+    },
+
+    // Miroir localStorage pour les métadonnées (sans audio)
+    _syncMetaToLocalStorage(meta) {
+        try {
+            const key = 'mp_meta_' + meta.id;
+            const { audioData, thumbnailBlob, ...safeMeta } = meta;
+            localStorage.setItem(key, JSON.stringify(safeMeta));
+            // Garder un index des IDs
+            const ids = JSON.parse(localStorage.getItem('mp_song_ids') || '[]');
+            if (!ids.includes(meta.id)) {
+                ids.push(meta.id);
+                localStorage.setItem('mp_song_ids', JSON.stringify(ids));
+            }
+        } catch (e) { /* localStorage plein — ignorer */ }
+    },
+
+    _removeMetaFromLocalStorage(id) {
+        try {
+            localStorage.removeItem('mp_meta_' + id);
+            const ids = JSON.parse(localStorage.getItem('mp_song_ids') || '[]');
+            localStorage.setItem('mp_song_ids', JSON.stringify(ids.filter(i => i !== id)));
+        } catch (e) { /* ignorer */ }
+    },
+
+    _loadMetaFromLocalStorage() {
+        try {
+            const ids = JSON.parse(localStorage.getItem('mp_song_ids') || '[]');
+            return ids.map(id => {
+                try { return JSON.parse(localStorage.getItem('mp_meta_' + id)); } catch { return null; }
+            }).filter(Boolean);
+        } catch { return []; }
+    },
+
+    // Migration automatique des anciennes données IndexedDB (audioData dans IDB) → OPFS
+    async migrateToOPFS() {
+        if (!this.opfsSupported || !this.idbAvailable) return;
+        if (localStorage.getItem('mp_opfs_migrated') === '2') return;
+
+        console.log('[Storage] Vérification migration OPFS...');
+        try {
+            const songs = await this.idbGetAll('songs');
+            let migrated = 0;
+            for (const song of songs) {
+                if (song.audioData && song.storageType !== 'opfs') {
+                    await this.opfsSaveAudio(song.id, song.audioData);
+                    const { audioData, thumbnailBlob, ...meta } = song;
+                    meta.storageType = 'opfs';
+                    // Ré-enregistrer la miniature séparément si existante
+                    if (thumbnailBlob) meta.thumbnailBlob = thumbnailBlob;
+                    await this.idbSave('songs', meta);
+                    this._syncMetaToLocalStorage(meta);
+                    migrated++;
+                } else {
+                    this._syncMetaToLocalStorage(song);
+                }
+            }
+            if (migrated > 0) console.log(`[Storage] Migration OPFS terminée : ${migrated} fichier(s) migré(s)`);
+            localStorage.setItem('mp_opfs_migrated', '2');
+        } catch (e) {
+            console.warn('[Storage] Migration OPFS partielle ou échouée:', e);
+        }
     }
+};
+
+// Alias db → storage pour compatibilité avec le code existant
+const db = {
+    get instance() { return storage.idbInstance; },
+    init: () => storage.idbInit(),
+    getAll: (s) => storage.idbGetAll(s),
+    save: (s, item) => storage.idbSave(s, item),
+    delete: (s, key) => storage.idbDelete(s, key)
 };
 
 // ----------------------------------------------------
@@ -492,7 +744,7 @@ function dismissSplash(minDurationMs = 2200) {
 let currentBlobUrl = null;
 
 const audioPlayer = {
-    load(song) {
+    async load(song) {
         // Release previous Blob URL to prevent memory leaks
         if (currentBlobUrl) {
             URL.revokeObjectURL(currentBlobUrl);
@@ -501,17 +753,24 @@ const audioPlayer = {
 
         try {
             if (song.isOnline) {
-                // Play directly from YouTube live streaming API
-                el.audio.src = `/api/stream-youtube?id=${song.id}`;
+                // Play directly from YouTube live streaming API (uses serverConfig for dynamic IP)
+                el.audio.src = serverConfig.apiUrl(`/api/stream-youtube?id=${song.id}`);
             } else {
-                // Reconstruct Blob from saved ArrayBuffer
-                const blob = new Blob([song.audioData], { type: 'audio/mp4' });
+                // Charge l'audio depuis OPFS ou IDB selon le type de stockage
+                let audioData = song.audioData;
+                if (!audioData || song.storageType === 'opfs') {
+                    audioData = await storage.getAudio(song);
+                }
+                if (!audioData) {
+                    throw new Error('Fichier audio introuvable dans le stockage local.');
+                }
+                const blob = new Blob([audioData], { type: 'audio/mp4' });
                 currentBlobUrl = URL.createObjectURL(blob);
                 el.audio.src = currentBlobUrl;
             }
         } catch (e) {
-            console.error('Error loading audio:', e);
-            alert('Impossible de charger le fichier audio.');
+            console.error('[Player] Erreur chargement audio:', e);
+            showToast('Impossible de charger ce morceau. ' + (e.message || ''), 'error', 4000);
         }
     },
 
@@ -637,11 +896,11 @@ const audioPlayer = {
         this.playQueueIndex(nextIndex);
     },
 
-    playQueueIndex(index) {
+    async playQueueIndex(index) {
         if (index < 0 || index >= state.currentQueue.length) return;
         state.currentIndex = index;
         const song = state.currentQueue[index];
-        this.load(song);
+        await this.load(song); // await OPFS/IDB async load
         this.play();
         this.updatePlayerUIAndMetadata(song);
         ui.renderLibraryList(); // update active styling in lists
@@ -1043,7 +1302,7 @@ const ui = {
             progressFill.style.width = '5%';
             progressText.textContent = 'Connexion à YouTube...';
             
-            const downloadPromise = fetch(`/api/download?id=${track.id}`, { signal })
+            const downloadPromise = fetch(serverConfig.apiUrl(`/api/download?id=${track.id}`), { signal })
                 .then(async (r) => {
                     const data = await r.json();
                     if (!r.ok || data.error) throw new Error(data.error || 'Téléchargement échoué');
@@ -1060,7 +1319,7 @@ const ui = {
             progressFill.style.width = '40%';
             progressText.textContent = 'Transfert vers iPhone...';
             
-            const fileResponse = await fetch(`/api/stream?id=${track.id}`, { signal });
+            const fileResponse = await fetch(serverConfig.apiUrl(`/api/stream?id=${track.id}`), { signal });
             if (!fileResponse.ok) throw new Error("Fichier non disponible");
             
             const reader = fileResponse.body.getReader();
@@ -1094,7 +1353,7 @@ const ui = {
             progressText.textContent = 'Enregistrement miniature...';
             let thumbnailBlob = null;
             try {
-                const thumbRes = await fetch(`/api/proxy-thumbnail?url=${encodeURIComponent(track.thumbnail)}`, { signal });
+                const thumbRes = await fetch(serverConfig.apiUrl(`/api/proxy-thumbnail?url=${encodeURIComponent(track.thumbnail)}`), { signal });
                 if (thumbRes.ok) thumbnailBlob = await thumbRes.blob();
             } catch (e) {
                 if (e.name === 'AbortError') throw e;
@@ -1125,7 +1384,8 @@ const ui = {
                 createdAt: Date.now()
             };
             
-            await db.save('songs', offlineSong);
+            await storage.saveSong(offlineSong);
+            // En mémoire : on garde la référence audio pour la lecture immédiate
             state.songs.push(offlineSong);
             
             activeDownloadAbortControllers.delete(track.id);
@@ -1203,7 +1463,7 @@ const ui = {
         if (progressContainer) progressContainer.classList.add('hidden');
         
         try {
-            await fetch(`/api/cancel-download?id=${videoId}`);
+            await fetch(serverConfig.apiUrl(`/api/cancel-download?id=${videoId}`));
         } catch (e) {
             console.warn('Failed to notify server of cancellation:', e);
         }
@@ -1398,8 +1658,8 @@ const ui = {
     async handleDeleteSong(songId) {
         if (confirm('Voulez-vous vraiment supprimer ce morceau de votre iPhone ?')) {
             try {
-                // Delete from DB
-                await db.delete('songs', songId);
+                // Delete from all storages (OPFS + IDB + localStorage)
+                await storage.deleteSong(songId);
                 
                 // Remove from state list
                 state.songs = state.songs.filter(s => s.id !== songId);
@@ -1408,7 +1668,7 @@ const ui = {
                 state.playlists.forEach(async (playlist) => {
                     if (playlist.songIds.includes(songId)) {
                         playlist.songIds = playlist.songIds.filter(id => id !== songId);
-                        await db.save('playlists', playlist);
+                        await storage.savePlaylist(playlist);
                     }
                 });
 
@@ -1527,7 +1787,7 @@ const ui = {
         // Setup Delete Playlist button
         el.playlistDelete.onclick = async () => {
             if (confirm(`Voulez-vous vraiment supprimer la playlist "${playlist.name}" ?`)) {
-                await db.delete('playlists', playlist.id);
+                await storage.deletePlaylist(playlist.id);
                 state.playlists = state.playlists.filter(p => p.id !== playlist.id);
                 el.playlistDetailView.classList.add('hidden');
                 state.activePlaylistId = null;
@@ -1541,7 +1801,7 @@ const ui = {
     // Remove song from specific playlist
     async handleRemoveSongFromPlaylist(playlist, songId) {
         playlist.songIds = playlist.songIds.filter(id => id !== songId);
-        await db.save('playlists', playlist);
+        await storage.savePlaylist(playlist);
         this.renderPlaylistDetail(playlist.id);
         this.renderPlaylistsGrid();
     },
@@ -1561,7 +1821,7 @@ const ui = {
                     // Check if already in playlist
                     if (!pl.songIds.includes(songId)) {
                         pl.songIds.push(songId);
-                        await db.save('playlists', pl);
+                        await storage.savePlaylist(pl);
                         this.renderPlaylistsGrid();
                         alert(`Ajouté à "${pl.name}"`);
                     } else {
@@ -1589,7 +1849,97 @@ function setupEventListeners() {
         });
     });
 
-    // Recherche YouTube instantanée (debounce + ignore les réponses obsolètes)
+    // ---- Panneau Paramètres ----
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+    const settingsSaveBtn = document.getElementById('settings-save-btn');
+    const settingsServerUrl = document.getElementById('settings-server-url');
+    const settingsTestBtn = document.getElementById('settings-test-btn');
+    const settingsTestResult = document.getElementById('settings-test-result');
+    const settingsOpfsBadge = document.getElementById('settings-opfs-badge');
+    const settingsIdbBadge = document.getElementById('settings-idb-badge');
+    const settingsSongsCount = document.getElementById('settings-songs-count');
+    const serverStatusDot = document.getElementById('server-status-dot');
+
+    function openSettingsModal() {
+        // Pré-remplir avec l'URL actuelle
+        if (settingsServerUrl) settingsServerUrl.value = serverConfig.baseUrl;
+        // Afficher le statut du stockage
+        if (settingsOpfsBadge) {
+            settingsOpfsBadge.textContent = storage.opfsSupported ? '✅ OPFS' : '⚠️ OPFS indispo';
+            settingsOpfsBadge.className = 'settings-badge ' + (storage.opfsSupported ? 'ok' : 'fail');
+        }
+        if (settingsIdbBadge) {
+            settingsIdbBadge.textContent = storage.idbAvailable ? '✅ IDB' : '❌ IDB';
+            settingsIdbBadge.className = 'settings-badge ' + (storage.idbAvailable ? 'ok' : 'fail');
+        }
+        if (settingsSongsCount) {
+            settingsSongsCount.textContent = `${state.songs.length} morceau${state.songs.length > 1 ? 'x' : ''}`;
+        }
+        if (settingsTestResult) {
+            settingsTestResult.textContent = '';
+            settingsTestResult.className = 'settings-test-result';
+        }
+        if (settingsModal) settingsModal.classList.remove('hidden');
+    }
+
+    if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+    if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', () => {
+        if (settingsModal) settingsModal.classList.add('hidden');
+    });
+
+    if (settingsTestBtn && settingsServerUrl && settingsTestResult) {
+        settingsTestBtn.addEventListener('click', async () => {
+            const url = settingsServerUrl.value.trim().replace(/\/$/, '');
+            if (!url) return;
+            settingsTestResult.textContent = 'Test en cours...';
+            settingsTestResult.className = 'settings-test-result checking';
+            try {
+                const r = await fetch(url + '/api/ping', { signal: AbortSignal.timeout(4000) });
+                if (r.ok) {
+                    settingsTestResult.textContent = '✅ Serveur accessible !';
+                    settingsTestResult.className = 'settings-test-result ok';
+                } else {
+                    settingsTestResult.textContent = `❌ Erreur HTTP ${r.status}`;
+                    settingsTestResult.className = 'settings-test-result fail';
+                }
+            } catch (e) {
+                settingsTestResult.textContent = '❌ Inaccessible. Vérifiez l\'IP et que le serveur est démarré.';
+                settingsTestResult.className = 'settings-test-result fail';
+            }
+        });
+    }
+
+    if (settingsSaveBtn && settingsServerUrl) {
+        settingsSaveBtn.addEventListener('click', () => {
+            const url = settingsServerUrl.value.trim().replace(/\/$/, '');
+            if (url) {
+                serverConfig.save(url);
+                showToast('URL serveur sauvegardée !', 'success');
+            }
+            if (settingsModal) settingsModal.classList.add('hidden');
+        });
+    }
+
+    // Vérification périodique du statut du serveur (toutes les 30s)
+    async function checkServerStatus() {
+        if (!serverStatusDot) return;
+        serverStatusDot.className = 'server-dot checking';
+        const ok = await serverConfig.ping();
+        serverStatusDot.className = 'server-dot ' + (ok ? 'online' : 'offline');
+        serverStatusDot.title = ok
+            ? `Serveur connecté : ${serverConfig.baseUrl}`
+            : `Serveur hors-ligne. Appuyez sur ⚙️ pour configurer.`;
+    }
+
+    // Vérifier au démarrage (après 2s) puis toutes les 30s
+    setTimeout(() => {
+        checkServerStatus();
+        setInterval(checkServerStatus, 30000);
+    }, 2000);
+
+
     let searchRequestId = 0;
     let searchDebounceTimeout = null;
 
@@ -1620,7 +1970,7 @@ function setupEventListeners() {
         `;
 
         try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            const res = await fetch(serverConfig.apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
             if (!res.ok) throw new Error('Erreur de recherche');
 
             const data = await res.json();
@@ -1637,7 +1987,8 @@ function setupEventListeners() {
             el.searchResultsPlaceholder.classList.add('hidden');
             el.searchResultsList.innerHTML = `
                 <div class="search-error">
-                    <p>Échec de la recherche. Vérifiez que le serveur PC est allumé et sur le même Wi-Fi.</p>
+                    <p>Serveur inaccessible. Allez dans <strong>⚙️ Paramètres</strong> pour configurer l'IP du serveur.</p>
+                    <p style="font-size:0.8em;color:#a855f7;margin-top:6px;">URL actuelle : ${serverConfig.baseUrl}</p>
                 </div>
             `;
         }
@@ -1757,7 +2108,7 @@ function setupEventListeners() {
         };
 
         try {
-            const id = await db.save('playlists', newPlaylist);
+            const id = await storage.savePlaylist(newPlaylist);
             newPlaylist.id = id;
             state.playlists.push(newPlaylist);
             
@@ -1833,7 +2184,7 @@ function setupEventListeners() {
             const favPlaylist = state.playlists.find(p => p.name === 'Favoris');
             if (favPlaylist) {
                 favPlaylist.songIds = favPlaylist.songIds.filter(id => id !== currentSong.id);
-                await db.save('playlists', favPlaylist);
+                await storage.savePlaylist(favPlaylist);
                 ui.renderPlaylistsGrid();
             }
         } else {
@@ -1844,13 +2195,13 @@ function setupEventListeners() {
             let favPlaylist = state.playlists.find(p => p.name === 'Favoris');
             if (!favPlaylist) {
                 favPlaylist = { name: 'Favoris', songIds: [], createdAt: Date.now() };
-                const id = await db.save('playlists', favPlaylist);
+                const id = await storage.savePlaylist(favPlaylist);
                 favPlaylist.id = id;
                 state.playlists.push(favPlaylist);
             }
             if (!favPlaylist.songIds.includes(currentSong.id)) {
                 favPlaylist.songIds.push(currentSong.id);
-                await db.save('playlists', favPlaylist);
+                await storage.savePlaylist(favPlaylist);
                 ui.renderPlaylistsGrid();
             }
         }
@@ -1967,31 +2318,37 @@ function setupEventListeners() {
         }
     });
 
-    // Auto-recover IndexedDB on resume/visibilitychange if iOS closed the connection in background
+    // Auto-recover on foreground resume : re-check IDB + rafraîchir l'UI
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'visible') {
-            console.log('App returned to foreground. Verifying database connection...');
-            if (!db.instance) {
+            console.log('[App] Retour au premier plan. Vérification du stockage...');
+            if (!storage.idbAvailable || !storage.idbInstance) {
                 try {
-                    await db.init();
-                    console.log('Database re-opened successfully on foreground resume.');
-                    state.songs = await db.getAll('songs');
-                    state.playlists = await db.getAll('playlists');
-                    ui.renderLibraryList();
-                    ui.renderPlaylistsGrid();
+                    await storage.idbInit();
+                    console.log('[App] IDB réouvert avec succès.');
                 } catch (e) {
-                    console.error('Failed to auto-reopen database on foreground resume:', e);
+                    console.warn('[App] IDB toujours indisponible, OPFS + localStorage utilisés.');
                 }
+            }
+            // Toujours rafraîchir depuis la source disponible
+            try {
+                state.songs = await storage.getAllSongs();
+                state.playlists = await storage.getAllPlaylists();
+                ui.renderLibraryList();
+                ui.renderPlaylistsGrid();
+            } catch (e) {
+                console.error('[App] Erreur au rafraîchissement:', e);
             }
         }
     });
 
     // Close IndexedDB on pagehide/unload to prevent locking during reloads (crucial iOS workaround)
     window.addEventListener('pagehide', () => {
-        if (db.instance) {
-            db.instance.close();
-            db.instance = null;
-            console.log('IndexedDB connection closed on pagehide.');
+        if (storage.idbInstance) {
+            storage.idbInstance.close();
+            storage.idbInstance = null;
+            storage.idbAvailable = false;
+            console.log('[App] IndexedDB fermée proprement sur pagehide.');
         }
     });
 }
@@ -2002,29 +2359,35 @@ function setupEventListeners() {
 async function initApp() {
     window.__splashStart = Date.now();
 
-    // 1. Initialize Audio controls & Event listeners first to keep UI responsive
+    // 0. Initialiser la config serveur (URL sauvegardée)
+    serverConfig.init();
+
+    // 1. Initialiser les contrôles audio et les listeners
     try {
         mediaSession.init();
         setupEventListeners();
     } catch (e) {
-        console.warn('Failed to setup audio controls / listeners:', e);
+        console.warn('[App] Échec setup audio/listeners:', e);
     }
 
-    // 2. Initialize database
+    // 2. Initialiser le stockage (OPFS + IDB en parallèle)
+    await storage.init();
+
     try {
-        await db.init();
-        
-        // Fetch offline lists
-        state.songs = await db.getAll('songs');
-        state.playlists = await db.getAll('playlists');
-        
-        // Populate Favorites set from "Favoris" playlist if it exists
+        // Migration automatique IndexedDB legacy → OPFS (silencieuse)
+        await storage.migrateToOPFS();
+
+        // Charger les données
+        state.songs = await storage.getAllSongs();
+        state.playlists = await storage.getAllPlaylists();
+
+        // Restaurer les favoris
         const favPlaylist = state.playlists.find(p => p.name === 'Favoris');
         if (favPlaylist) {
             favPlaylist.songIds.forEach(id => state.favorites.add(id));
         }
 
-        // Restore player preferences
+        // Restaurer les préférences joueur
         const savedRepeat = localStorage.getItem('mervyplayer-repeat');
         if (savedRepeat && ['none', 'all', 'one'].includes(savedRepeat)) {
             state.isRepeat = savedRepeat;
@@ -2034,31 +2397,35 @@ async function initApp() {
             state.isShuffle = true;
             el.shuffleBtn.classList.add('active');
         }
-
         const savedSort = localStorage.getItem('mervyplayer-sort');
         if (savedSort && el.librarySortSelect) {
             state.sortMode = savedSort;
             el.librarySortSelect.value = savedSort;
         }
 
-        // Render offline screens
+        // Afficher la bibliothèque
         ui.renderLibraryList();
         ui.renderPlaylistsGrid();
-        
+
+        // Rapport de stockage
+        const opfsTag = storage.opfsSupported ? '✅ OPFS' : '⚠️ IDB uniquement';
+        const idbTag = storage.idbAvailable ? '✅ IDB' : '❌ IDB indisponible';
+        console.log(`[App] Stockage : ${opfsTag} | ${idbTag} | ${state.songs.length} morceau(x) chargé(s)`);
+
+        if (!storage.idbAvailable && !storage.opfsSupported) {
+            showToast('⚠️ Stockage hors-ligne limité. Connectez-vous régulièrement.', 'error', 8000);
+        } else if (!storage.idbAvailable) {
+            showToast('ℹ️ Base de données temporairement indisponible. Musiques OPFS disponibles.', 'info', 5000);
+        }
+
         await dismissSplash(2200);
-        
+
     } catch (e) {
-        console.error('MervyPlayer database boot failure:', e);
-        
-        // Render empty lists so UI does not hang or display loading indicators forever
+        console.error('[App] Erreur au démarrage:', e);
         ui.renderLibraryList();
         ui.renderPlaylistsGrid();
-        
         await dismissSplash(800);
-        
-        // Non-blocking user warning via custom Toast
-        const errMsg = e ? ` (${e.name || e.message || e.toString()})` : '';
-        showToast(`Stockage hors-ligne indisponible${errMsg}. Mode en ligne uniquement.`, "error", 8000);
+        showToast('Erreur de démarrage. Vérifiez les paramètres.', 'error', 6000);
     }
 }
 

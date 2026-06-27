@@ -5,7 +5,7 @@
  * chargement rapide et un accès partiel hors-ligne à l'interface.
  * Les fichiers audio ne sont PAS mis en cache ici (stockés dans IndexedDB).
  */
-const CACHE_NAME = 'mervyplayer-cache-v14';
+const CACHE_NAME = 'mervyplayer-cache-v15';
 const ASSETS = [
     '/',
     '/index.html',

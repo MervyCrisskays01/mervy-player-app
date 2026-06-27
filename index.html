@@ -22,7 +22,7 @@
     <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png?v=1.1">
     <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png?v=1.1">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=1.1">
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="./manifest.json">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -68,11 +68,19 @@
                 <img src="/icon-192.png" alt="" class="header-logo">
                 <h1 id="app-title">MervyPlayer</h1>
             </div>
-            <button id="force-update-btn" class="header-action-btn" title="Actualiser et mettre à jour">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-                </svg>
-            </button>
+            <div class="header-actions">
+                <span id="server-status-dot" class="server-dot offline" title="Statut serveur"></span>
+                <button id="settings-btn" class="header-action-btn" title="Paramètres">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </svg>
+                </button>
+                <button id="force-update-btn" class="header-action-btn" title="Actualiser et mettre à jour">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                    </svg>
+                </button>
+            </div>
         </header>
 
         <!-- Dynamic Content View Area -->
@@ -423,6 +431,45 @@
 
     <!-- Hidden Native Audio Node -->
     <audio id="native-audio-element" style="display:none;"></audio>
+
+    <!-- Modal Paramètres Serveur -->
+    <div id="settings-modal" class="modal-overlay hidden">
+        <div class="modal-content settings-modal-content">
+            <h3>⚙️ Paramètres</h3>
+
+            <!-- Statut du stockage -->
+            <div class="settings-section">
+                <div class="settings-label">Stockage local</div>
+                <div id="settings-storage-info" class="settings-info-row">
+                    <span id="settings-opfs-badge" class="settings-badge">OPFS ?</span>
+                    <span id="settings-idb-badge" class="settings-badge">IDB ?</span>
+                    <span id="settings-songs-count">-- morceaux</span>
+                </div>
+            </div>
+
+            <!-- Configuration IP serveur -->
+            <div class="settings-section">
+                <div class="settings-label">URL du serveur PC</div>
+                <p class="settings-hint">Entrez l'adresse IP de votre PC Windows (avec le port). Exemple : <code>https://192.168.1.45:3000</code></p>
+                <div class="settings-input-row">
+                    <input type="url" id="settings-server-url" class="settings-url-input"
+                        placeholder="https://192.168.x.x:3000"
+                        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                    <button id="settings-test-btn" class="settings-test-btn">Tester</button>
+                </div>
+                <div id="settings-test-result" class="settings-test-result"></div>
+            </div>
+
+            <div class="settings-hint" style="margin-top:8px; opacity:0.7;">
+                💡 Vos musiques téléchargées restent disponibles <strong>hors-ligne</strong> même si le serveur est éteint.
+            </div>
+
+            <div class="modal-actions">
+                <button id="settings-cancel-btn" class="text-btn">Fermer</button>
+                <button id="settings-save-btn" class="glow-btn">Sauvegarder</button>
+            </div>
+        </div>
+    </div>
 
     <!-- App JavaScript -->
     <script src="jszip.min.js"></script>
