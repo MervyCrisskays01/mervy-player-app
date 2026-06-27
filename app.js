@@ -202,13 +202,57 @@ const storage = {
         }
     },
 
-    async opfsSaveAudio(id, arrayBuffer) {
-        const root = await navigator.storage.getDirectory();
-        const dir = await root.getDirectoryHandle('audio', { create: true });
-        const fh = await dir.getFileHandle(`${id}.m4a`, { create: true });
-        const writable = await fh.createWritable();
-        await writable.write(arrayBuffer);
-        await writable.close();
+    opfsSaveAudio(id, arrayBuffer) {
+        return new Promise((resolve, reject) => {
+            try {
+                // Safari iOS exige que l'écriture OPFS se fasse dans un Web Worker (createWritable n'existe pas sur le thread principal)
+                const workerCode = `
+                    self.onmessage = async (e) => {
+                        try {
+                            const { id, arrayBuffer } = e.data;
+                            const root = await navigator.storage.getDirectory();
+                            const dir = await root.getDirectoryHandle('audio', { create: true });
+                            const fh = await dir.getFileHandle(id + '.m4a', { create: true });
+                            
+                            // Utilise l'accès synchrone (SyncAccessHandle) dans le Worker pour iOS Safari
+                            const accessHandle = await fh.createSyncAccessHandle();
+                            accessHandle.truncate(0);
+                            accessHandle.write(new Uint8Array(arrayBuffer));
+                            accessHandle.flush();
+                            accessHandle.close();
+                            self.postMessage({ success: true });
+                        } catch (err) {
+                            self.postMessage({ success: false, error: err.message || err.toString() });
+                        }
+                    };
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                const worker = new Worker(workerUrl);
+                
+                worker.onmessage = (e) => {
+                    worker.terminate();
+                    URL.revokeObjectURL(workerUrl);
+                    if (e.data.success) {
+                        resolve();
+                    } else {
+                        reject(new Error(e.data.error));
+                    }
+                };
+                
+                worker.onerror = (err) => {
+                    worker.terminate();
+                    URL.revokeObjectURL(workerUrl);
+                    reject(err);
+                };
+                
+                // Transférer l'arrayBuffer pour éviter la copie mémoire
+                worker.postMessage({ id, arrayBuffer }, [arrayBuffer]);
+            } catch (err) {
+                reject(err);
+            }
+        });
     },
 
     async opfsGetAudio(id) {
